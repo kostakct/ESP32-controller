@@ -1,67 +1,65 @@
-export type PowerOnState = 'OFF' | 'ON' | 'KEEP_LAST';
-
-export type NotificationMode = 'OFF' | 'ALL' | 'ONLY_ON' | 'ONLY_OFF';
+export type PowerOnState = 'OFF' | 'ON' | 'RESTORE';
 
 export interface DelayConfig {
   enabled: boolean;
-  durationSeconds: number; // e.g. 5.5s (supports 0.5s steps)
-  maxRepeats: number; // 1, 2, 3, 4, 5
+  durationSeconds: number; // Interval základního kroku prodloužení (např. 600s = 10 min)
+  maxRepeats: number; // 0 = neomezeno (až po limit MAX), jinak 1 až N
 }
 
 export interface SwitchItem {
-  id: string; // e.g. 'relay_1'
-  channelIndex: number; // 1..8
+  id: string;
   name: string;
-  order: number;
-  visible: boolean;
-  powerOnState: PowerOnState;
-  delayConfig: DelayConfig;
-  notificationMode: NotificationMode;
-  // Runtime state
+  channelIndex: number; // 1, 2, 3, 4
   isOn: boolean;
+  powerOnState: PowerOnState;
+  isVisible: boolean;
+  order: number;
+  
+  // Funkce delay (prodlužované sepnutí)
+  delayConfig: DelayConfig;
+  currentRepeats: number; // Kolikrát bylo stisknuto (1 = základ, 2 = dvojnásobek, atd.)
+  remainingSeconds: number; // Zbývající čas aktuálního běhu
+  totalDelaySeconds: number; // Celkový napočítaný čas
   isDelayRunning: boolean;
-  currentRepeats: number; // current clicked repeat count (e.g. 1 to maxRepeats)
-  remainingSeconds: number;
-  totalDelaySeconds: number;
-  lastToggledAt?: number;
+
+  // Ochrana maximálního času chodu (bez časovače i s časovačem)
+  // 0 = Vypnuto / NIKDY, 1 až 1440 = čas v minutách (až 24 hodin)
+  maxRuntimeGuardMinutes?: number;
+
+  // Notifikace / zvýraznění stavu OFFLINE (červená linka obrysu při ztrátě spojení)
+  offlineAlertEnabled?: boolean;
 }
 
-export type ScheduleRepeatType = 'ONCE' | 'DAILY' | 'WEEKDAYS' | 'WEEKENDS' | 'CUSTOM';
+export type ScheduleActionType = 'ON' | 'OFF' | 'TOGGLE' | 'DELAY';
 
 export interface ScheduleItem {
   id: string;
   switchId: string;
+  name: string;
   time: string; // "HH:MM"
-  action: 'ON' | 'OFF';
+  daysOfWeek: number[]; // 0 = Neděle, 1 = Pondělí, ..., 6 = Sobota (prázdné = jednorázově)
+  action: ScheduleActionType;
+  delayDurationSeconds?: number;
   enabled: boolean;
-  repeatType: ScheduleRepeatType;
-  customDays: number[]; // 0 = Sun, 1 = Mon, 2 = Tue, ..., 6 = Sat
 }
 
 export interface ESP32DeviceStatus {
   online: boolean;
   ip: string;
-  wifiSsid: string;
-  wifiRssi: number; // -55 dBm
+  wifiRssi: number;
   uptimeSeconds: number;
-  freeHeap: number;
-  // Sensors preview
-  oneWireTemp1: number | null;
-  oneWireTemp2: number | null;
-  am2320Temp: number | null;
-  am2320Hum: number | null;
-  ldr: number | null;
-  input1Active: boolean;
-  input2Active: boolean;
-  input3Active: boolean;
-  input4Active: boolean;
+  heapFree: number;
+  oneWireTemp1?: number; // Teplota trubky 1 (DS18B20)
+  oneWireTemp2?: number; // Teplota trubky 2 (DS18B20)
+  am2320Temp?: number;   // Prostorová teplota
+  am2320Hum?: number;    // Vlhkost vzduchu
+  ldr?: number;          // Fotorezistor (intenzita světla)
+  input1Active?: boolean; // Digitální vstup 1 (PIR / tlačítko)
+  input2Active?: boolean;
+  input3Active?: boolean;
+  input4Active?: boolean;
+  lastSeenTimestamp?: number;
+  sensorOfflineAlertEnabled?: boolean;
 }
 
-export interface AppNotification {
-  id: string;
-  title: string;
-  body: string;
-  timestamp: number;
-  switchId: string;
-  type: 'ON' | 'OFF' | 'TIMER' | 'SCHEDULE';
-}
+export type TabType = 'switches' | 'schedules' | 'esp32' | 'mqtt';
