@@ -1,35 +1,25 @@
 <!doctype html>
-<html lang="cs">
+<html lang="cs" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#0284c7" />
+    
+    <title>ESP32 IoT Ovladač</title>
+
+    <!-- Nastavení pro PWA / instalaci na plochu bez adresního řádku -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>ESP32 eWeLink Controller</title>
-    <meta name="description" content="Mobilní rozhraní ve stylu aplikace eWeLink pro dálkovou správu 4 spínačů ESP32-S3 přes MQTT, s funkcemi časovače a prodlužovaného delay." />
-    <meta property="og:title" content="ESP32 eWeLink Controller" />
-    <meta property="og:description" content="Mobilní rozhraní ve stylu aplikace eWeLink pro dálkovou správu 4 spínačů ESP32-S3 přes MQTT, s funkcemi časovače a prodlužovaného delay." />
-    <meta property="og:type" content="website" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="ESP eWeLink" />
-    <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="manifest" href="/manifest.json" />
+    <meta name="apple-mobile-web-app-title" content="ESP32 Ovladač" />
+    <meta name="application-name" content="ESP32 Ovladač" />
+    <meta name="theme-color" content="#090d16" />
+
+    <!-- Web App Manifest vložený přímo v HTML pro bezchybnou instalaci -->
+    <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22ESP32%20IoT%20Ovlada%C4%8D%22%2C%22short_name%22%3A%22ESP32%22%2C%22start_url%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23090d16%22%2C%22theme_color%22%3A%22%23090d16%22%2C%22orientation%22%3A%22portrait%22%7D" />
   </head>
-  <body class="bg-[#eaf1f7] text-slate-800 antialiased">
+  <body class="bg-slate-950 text-slate-100 min-h-screen">
     <div id="root"></div>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').then(
-            (registration) => { console.log('SW registered successfully.'); },
-            (err) => { console.error('SW registration failed:', err); }
-          );
-        });
-      }
-    </script>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
-
