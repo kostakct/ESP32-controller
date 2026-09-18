@@ -1,0 +1,6 @@
+{
+  "name": "ESP32 eWeLink Controller",
+  "description": "Mobilní rozhraní ve stylu aplikace eWeLink pro dálkovou správu 4 spínačů ESP32-S3 přes MQTT, s funkcemi časovače a prodlužovaného delay.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
