@@ -2,15 +2,15 @@
   "name": "ESP32 eWeLink Controller",
   "short_name": "ESP32",
   "description": "Mobilní ovladač pro ESP32-S3 se spínači, delay funkcí a plánovačem.",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/ESP32-controller/",
+  "scope": "/ESP32-controller/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0f172a",
   "theme_color": "#0284c7",
   "icons": [
     {
-      "src": "./favicon.svg",
+      "src": "/ESP32-controller/favicon.svg",
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
