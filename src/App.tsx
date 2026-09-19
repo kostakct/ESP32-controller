@@ -230,6 +230,7 @@ export default function App() {
   // Modals state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [activeSwitchSettingsId, setActiveSwitchSettingsId] = useState<string | null>(null);
+  const [selectedScheduleForEdit, setSelectedScheduleForEdit] = useState<ScheduleItem | null>(null);
   const [isMobileTestOpen, setIsMobileTestOpen] = useState<boolean>(false);
   const [isEspCodeOpen, setIsEspCodeOpen] = useState<boolean>(false);
 
@@ -449,8 +450,20 @@ export default function App() {
     };
 
     const interval = setInterval(checkSchedule, 1000);
-    return () => clearInterval(interval);
-  }, [schedules]);
+
+    // Při probuzení aplikace na telefonu ihned zkontrolovat plánovače
+    const handleWakeCheck = () => {
+      if (document.visibilityState === 'visible') {
+        checkSchedule();
+      }
+    };
+    document.addEventListener('visibilitychange', handleWakeCheck);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleWakeCheck);
+    };
+  }, [schedules, switches]);
 
   // Trigger a schedule action
   const triggerScheduleAction = (sch: ScheduleItem) => {
@@ -832,6 +845,10 @@ export default function App() {
                         setActiveSwitchSettingsId(id);
                         setIsSettingsOpen(true);
                       }}
+                      onOpenSchedule={(sch) => {
+                        setSelectedScheduleForEdit(sch);
+                        setActiveTab('schedules');
+                      }}
                     />
                   ))
                 )}
@@ -848,6 +865,8 @@ export default function App() {
               onSaveSchedule={handleSaveSchedule}
               onDeleteSchedule={handleDeleteSchedule}
               onTriggerTestSchedule={triggerScheduleAction}
+              selectedSchedule={selectedScheduleForEdit}
+              onClearSelectedSchedule={() => setSelectedScheduleForEdit(null)}
             />
           )}
 

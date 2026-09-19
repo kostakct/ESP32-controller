@@ -11,6 +11,8 @@ interface ScheduleViewProps {
   onSaveSchedule: (schedule: ScheduleItem) => void;
   onDeleteSchedule: (id: string) => void;
   onTriggerTestSchedule: (schedule: ScheduleItem) => void;
+  selectedSchedule?: ScheduleItem | null;
+  onClearSelectedSchedule?: () => void;
 }
 
 export const ScheduleView: React.FC<ScheduleViewProps> = ({
@@ -20,9 +22,22 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
   onSaveSchedule,
   onDeleteSchedule,
   onTriggerTestSchedule,
+  selectedSchedule,
+  onClearSelectedSchedule,
 }) => {
   const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Otevřít modal pokud přišel požadavek z vnějšku (např. z hlavní karty spínače)
+  React.useEffect(() => {
+    if (selectedSchedule) {
+      setEditingSchedule(selectedSchedule);
+      setIsModalOpen(true);
+      if (onClearSelectedSchedule) {
+        onClearSelectedSchedule();
+      }
+    }
+  }, [selectedSchedule, onClearSelectedSchedule]);
 
   // Map switchId to Switch item
   const switchMap = new Map<string, SwitchItem>(switches.map((s) => [s.id, s]));
@@ -95,9 +110,13 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
+                  <div
+                    className="flex items-center gap-3 cursor-pointer select-none flex-1 group"
+                    onClick={() => handleEdit(item)}
+                    title="Kliknutím upravit časovač"
+                  >
                     {/* Big time display */}
-                    <div className="font-mono text-2xl font-bold tracking-tight text-slate-800">
+                    <div className="font-mono text-2xl font-bold tracking-tight text-slate-800 group-hover:text-sky-600 transition-colors">
                       {item.time}
                     </div>
 
@@ -113,7 +132,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
                         >
                           {item.action === 'ON' ? 'Sepnout (ON)' : 'Vypnout (OFF)'}
                         </span>
-                        <span className="text-xs font-semibold text-slate-800">
+                        <span className="text-xs font-semibold text-slate-800 group-hover:underline">
                           {switchName}
                         </span>
                       </div>

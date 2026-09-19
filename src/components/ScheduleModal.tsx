@@ -35,6 +35,27 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     initialSchedule ? initialSchedule.enabled : true
   );
 
+  // Synchronizovat stav formuláře při každém otevření nebo změně initialSchedule
+  React.useEffect(() => {
+    if (isOpen) {
+      if (initialSchedule) {
+        setSwitchId(initialSchedule.switchId);
+        setTime(initialSchedule.time);
+        setAction(initialSchedule.action);
+        setRepeatType(initialSchedule.repeatType);
+        setCustomDays(initialSchedule.customDays || [1, 2, 3, 4, 5]);
+        setEnabled(initialSchedule.enabled);
+      } else {
+        setSwitchId(switches[0]?.id || '');
+        setTime('20:00');
+        setAction('ON');
+        setRepeatType('DAILY');
+        setCustomDays([0, 1, 2, 3, 4, 5, 6]);
+        setEnabled(true);
+      }
+    }
+  }, [isOpen, initialSchedule, switches]);
+
   if (!isOpen) return null;
 
   const handleToggleDay = (dayIndex: number) => {

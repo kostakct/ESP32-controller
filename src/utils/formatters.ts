@@ -90,6 +90,7 @@ export function getNextScheduleEvent(switchId: string, schedules: any[]): { time
           else dayNameStr = CZECH_DAY_FULL[checkDay];
 
           nextEvent = {
+            schedule: sch,
             time: sch.time,
             action: sch.action,
             dayOffset,

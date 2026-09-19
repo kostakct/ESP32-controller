@@ -28,6 +28,7 @@ interface SwitchCardProps {
   onToggle: (id: string) => void;
   onLongPressReset?: (id: string) => void;
   onOpenItemSettings: (id: string) => void;
+  onOpenSchedule?: (schedule: ScheduleItem) => void;
 }
 
 export const SwitchCard: React.FC<SwitchCardProps> = ({
@@ -37,6 +38,7 @@ export const SwitchCard: React.FC<SwitchCardProps> = ({
   onToggle,
   onLongPressReset,
   onOpenItemSettings,
+  onOpenSchedule,
 }) => {
   const isDelayActive = item.delayConfig.enabled;
   const isRunning = !isOffline && item.isDelayRunning && item.isOn;
@@ -151,17 +153,19 @@ export const SwitchCard: React.FC<SwitchCardProps> = ({
 
               {/* Delay badge: Timer icon and duration */}
               {isDelayActive && (
-                <span
-                  className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md border ${
+                <button
+                  type="button"
+                  onClick={() => onOpenItemSettings(item.id)}
+                  className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md border transition hover:scale-105 active:scale-95 cursor-pointer ${
                     isRunning
                       ? 'bg-sky-50 text-sky-800 border-sky-300 font-bold animate-pulse'
-                      : 'bg-sky-50/60 text-sky-700 border-sky-200'
+                      : 'bg-sky-50/60 text-sky-700 border-sky-200 hover:bg-sky-100/80 hover:border-sky-300'
                   }`}
-                  title={`Zpožděné vypnutí nastaveno na ${formatDuration(item.delayConfig.durationSeconds)}`}
+                  title={`Zpožděné vypnutí nastaveno na ${formatDuration(item.delayConfig.durationSeconds)} (kliknutím upravit)`}
                 >
                   <Timer className="w-3 h-3 text-sky-600 flex-shrink-0" />
                   <span>Delay: {formatDuration(item.delayConfig.durationSeconds)}</span>
-                </span>
+                </button>
               )}
 
               {/* Offline indicator badge if disconnected */}
@@ -249,18 +253,30 @@ export const SwitchCard: React.FC<SwitchCardProps> = ({
               {(() => {
                 const nextEvent = getNextScheduleEvent(item.id, schedules);
                 if (nextEvent) {
+                  const targetSchedule = (nextEvent as any).schedule;
                   return (
-                    <>
-                      <div className="h-9 sm:h-10 flex flex-col justify-center items-center leading-tight">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (targetSchedule && onOpenSchedule) {
+                          onOpenSchedule(targetSchedule);
+                        } else {
+                          onOpenItemSettings(item.id);
+                        }
+                      }}
+                      className="group flex flex-col items-center leading-tight hover:scale-105 active:scale-95 transition cursor-pointer"
+                      title={`Naplánováno na ${nextEvent.time} (${nextEvent.action === 'ON' ? 'Sepnout' : 'Vypnout'}). Klikněte pro úpravu.`}
+                    >
+                      <div className="h-9 sm:h-10 flex flex-col justify-center items-center leading-tight group-hover:text-sky-700">
                         <span className="text-base sm:text-lg leading-none mb-[2px]">{nextEvent.time}</span>
                         <span className="text-[11px] sm:text-xs leading-none">{nextEvent.action === 'ON' ? 'ZAP' : 'VYP'}</span>
                       </div>
                       {nextEvent.dayOffset > 0 && (
-                        <span className="text-[10px] text-sky-600 font-medium px-2 py-0.5 bg-sky-50 border border-sky-200 rounded-full whitespace-nowrap leading-none shadow-sm">
+                        <span className="text-[10px] text-sky-600 font-medium px-2 py-0.5 bg-sky-50 border border-sky-200 rounded-full whitespace-nowrap leading-none shadow-sm group-hover:bg-sky-100">
                           {nextEvent.dayName}
                         </span>
                       )}
-                    </>
+                    </button>
                   );
                 } else if (item.isOn && !isDelayActive) {
                   // Switch is ON, no delay running, no schedule next -> manual toggle

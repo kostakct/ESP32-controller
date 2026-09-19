@@ -49,12 +49,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     activeSwitchId || switches[0]?.id || null
   );
 
-  // Update expandedId if activeSwitchId changes
+  // Update expandedId if activeSwitchId changes and auto-scroll to it
   React.useEffect(() => {
     if (activeSwitchId) {
       setExpandedId(activeSwitchId);
+      // Malé zpoždění pro vykreslení DOM
+      setTimeout(() => {
+        const el = document.getElementById(`settings-item-${activeSwitchId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
     }
-  }, [activeSwitchId]);
+  }, [activeSwitchId, isOpen]);
 
   if (!isOpen) return null;
 
