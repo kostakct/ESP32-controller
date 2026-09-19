@@ -27,29 +27,66 @@ const STORAGE_KEY_SWITCHES = 'ewelink_esp32_switches_v1';
 const STORAGE_KEY_SCHEDULES = 'ewelink_esp32_schedules_v1';
 
 export default function App() {
-  // Load saved switches or fall back to initial
+  // Load saved switches or fall back to initial with robust 8-channel migration
   const [switches, setSwitches] = useState<SwitchItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SWITCHES);
       if (saved) {
         const parsed: SwitchItem[] = JSON.parse(saved);
-        // Reset volatile runtime states on initial load according to powerOnState!
-        return parsed.map((item) => ({
-          ...item,
-          isOn:
-            item.powerOnState === 'ON'
-              ? true
-              : item.powerOnState === 'OFF'
-              ? false
-              : item.isOn,
-          isDelayRunning: false,
-          currentRepeats: 1,
-          remainingSeconds: 0,
-          totalDelaySeconds: 0,
-        }));
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // VŽDY zajistíme plných 8 kanálů sloučením s INITIAL_SWITCHES
+          const merged: SwitchItem[] = INITIAL_SWITCHES.map((initSw) => {
+            const existing = parsed.find(
+              (p) => p.channelIndex === initSw.channelIndex || p.id === initSw.id
+            );
+            if (existing) {
+              // Záchrana viditelnosti: podpora starých i nových klíčů (visible vs isVisible)
+              const rawVis = existing.visible !== undefined 
+                ? existing.visible 
+                : ((existing as any).isVisible !== undefined ? (existing as any).isVisible : true);
+
+              return {
+                ...initSw,
+                ...existing,
+                name: existing.name || initSw.name,
+                visible: Boolean(rawVis),
+                delayConfig: {
+                  ...initSw.delayConfig,
+                  ...(existing.delayConfig || {}),
+                },
+                maxRuntimeGuardMinutes: existing.maxRuntimeGuardMinutes !== undefined 
+                  ? existing.maxRuntimeGuardMinutes 
+                  : initSw.maxRuntimeGuardMinutes,
+                powerOnState: existing.powerOnState || initSw.powerOnState,
+                notificationMode: existing.notificationMode || initSw.notificationMode,
+                // Runtime stavy: inicializujeme bezpečně, reálný stav převezmeme z ESP32 přes MQTT
+                isOn:
+                  existing.powerOnState === 'ON'
+                    ? true
+                    : existing.powerOnState === 'OFF'
+                    ? false
+                    : Boolean(existing.isOn),
+                isDelayRunning: false,
+                currentRepeats: 1,
+                remainingSeconds: 0,
+                totalDelaySeconds: 0,
+              };
+            }
+            return initSw;
+          });
+
+          // Bezpečnostní kontrola: pokud by z nějakého důvodu všechny prvky měly visible: false,
+          // automaticky všechny zviditelníme, aby plocha nikdy nezůstala prázdná
+          const hasAnyVisible = merged.some((s) => s.visible);
+          if (!hasAnyVisible) {
+            return merged.map((s) => ({ ...s, visible: true }));
+          }
+
+          return merged;
+        }
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      console.warn('Chyba při načítání spínačů z paměti, použity výchozí:', e);
     }
     return INITIAL_SWITCHES;
   });
@@ -69,36 +106,38 @@ export default function App() {
   const [deviceStatus, setDeviceStatus] = useState<ESP32DeviceStatus>(INITIAL_DEVICE_STATUS);
 
   // Custom MQTT Hook
-  const { isConnected, telemetry, sendRelayCommand } = useMqtt();
+  const { isConnected, telemetry, sendRelayCommand, sendRelayConfig, requestStatus } = useMqtt();
+
+  // Stav online/offline na základě MQTT konektivity
+  const isOffline = !isConnected;
 
   // Ref pro přístup k aktuálnímu stavu spínačů uvnitř MQTT efektu bez zacyklení
   const switchesRef = useRef(switches);
   useEffect(() => { switchesRef.current = switches; }, [switches]);
 
-  // Listen to MQTT Telemetry to update device status
+  // Listen to MQTT Telemetry to update device status & synchronize actual hardware reality
   useEffect(() => {
     if (telemetry) {
       if (telemetry.event === 'boot') {
-        // ESP se právě probudilo/restartovalo -> Diktujeme stav!
-        setDeviceStatus(prev => ({ ...prev, online: true }));
-        setSwitches(prev => {
-          const next = [...prev];
-          next.forEach(sw => {
-            let targetState = false;
-            if (sw.powerOnState === 'ON') targetState = true;
-            else if (sw.powerOnState === 'OFF') targetState = false;
-            else if (sw.powerOnState === 'KEEP') targetState = sw.isOn; // Poslední známý stav
-            
-            // Okamžitě odešleme garantovaně přes QoS 1
-            sendRelayCommand(sw.channelIndex - 1, targetState);
-            sw.isOn = targetState;
-          });
-          return next;
+        // ESP se probudilo / restartovalo
+        setDeviceStatus(prev => ({ ...prev, online: true, lastSeenTimestamp: Date.now() }));
+        // Zašleme do ESP32 konfiguraci pro všech 8 relé (delay, guard, power-on stav)
+        switchesRef.current.forEach(sw => {
+          sendRelayConfig(
+            sw.channelIndex - 1,
+            sw.delayConfig.enabled,
+            sw.delayConfig.durationSeconds,
+            sw.maxRuntimeGuardMinutes || 0,
+            sw.powerOnState
+          );
         });
-      } else if (telemetry.event === 'telemetry') {
+        // Vyžádáme si okamžitou telemetrii stavu z hardware
+        requestStatus();
+      } else if (telemetry.event === 'telemetry' || telemetry.event === 'status_response') {
         setDeviceStatus(prev => ({
           ...prev,
           online: true,
+          lastSeenTimestamp: Date.now(),
           oneWireTemp1: telemetry.onewire1_temp ?? prev.oneWireTemp1,
           oneWireTemp2: telemetry.onewire2_temp ?? prev.oneWireTemp2,
           am2320Temp: telemetry.am2320_temp ?? prev.am2320Temp,
@@ -106,22 +145,59 @@ export default function App() {
           ldr: telemetry.ldr ?? prev.ldr,
         }));
 
-        // SELF-HEALING: Kontrola, zda se hardware nerozjel s aplikací
+        // ZPĚTNÁ SYNCHRONIZACE: Načtení skutečného stavu hardware z ESP32 do aplikace
+        // ESP32 je pánem reálného stavu - aplikace převezme skutečnost z HW
         if (telemetry.relays && Array.isArray(telemetry.relays)) {
-          switchesRef.current.forEach(sw => {
-            const hwState = telemetry.relays[sw.channelIndex - 1];
-            if (hwState !== undefined) {
-              const isHwOn = hwState === 1;
-              if (isHwOn !== sw.isOn) {
-                // Aplikace si myslí něco jiného než HW hlásí. 
-                // Aplikace je MASTER (kvůli Delay a Schedules), takže převálcujeme HW.
-                console.log(`[AUTOSYNC] Nesoulad relé ${sw.channelIndex}. App: ${sw.isOn}, HW: ${isHwOn}. Odesílám opravu.`);
-                sendRelayCommand(sw.channelIndex - 1, sw.isOn);
+          setSwitches(prev =>
+            prev.map(sw => {
+              const hwVal = telemetry.relays[sw.channelIndex - 1];
+              if (hwVal !== undefined) {
+                const isHwOn = hwVal === 1;
+
+                // Kontrola zbývajícího času z telemetrie ESP (pokud firmware posílá timers[])
+                const remTimerSec = (telemetry.timers && Array.isArray(telemetry.timers))
+                  ? (telemetry.timers[sw.channelIndex - 1] ?? 0)
+                  : 0;
+
+                if (isHwOn) {
+                  // Hardwarové relé je v ESP skutečně ZAPNUTO
+                  const delayEnabled = sw.delayConfig.enabled;
+                  const hasActiveTimer = remTimerSec > 0 || sw.isDelayRunning;
+                  const activeSec = remTimerSec > 0 
+                    ? remTimerSec 
+                    : (sw.remainingSeconds > 0 ? sw.remainingSeconds : sw.delayConfig.durationSeconds);
+
+                  return {
+                    ...sw,
+                    isOn: true,
+                    isDelayRunning: delayEnabled && hasActiveTimer,
+                    remainingSeconds: delayEnabled ? activeSec : 0,
+                    totalDelaySeconds: delayEnabled ? Math.max(sw.totalDelaySeconds, activeSec) : 0,
+                  };
+                } else {
+                  // Hardwarové relé je v ESP skutečně VYPNUTO
+                  return {
+                    ...sw,
+                    isOn: false,
+                    isDelayRunning: false,
+                    remainingSeconds: 0,
+                    totalDelaySeconds: 0,
+                    currentRepeats: 1,
+                  };
+                }
               }
-            }
-          });
+              return sw;
+            })
+          );
         }
 
+      } else if (telemetry.event === 'button_long_press') {
+        // Dlouhý stisk na hardwarovém tlačítku ESP32 (1.5s) -> okamžitý reset delay v aplikaci
+        const btnIdx = telemetry.button_index;
+        const targetSw = switchesRef.current.find(s => s.channelIndex - 1 === btnIdx);
+        if (targetSw) {
+          handleLongPressReset(targetSw.id);
+        }
       } else if (telemetry.event === 'button_press') {
         const btnIndex = telemetry.button_index;
         setDeviceStatus(prev => {
@@ -460,8 +536,8 @@ export default function App() {
         // 2a) If switch is OFF -> Turn ON, start Delay at 1x
         if (!sw.isOn) {
           const baseDuration = sw.delayConfig.durationSeconds;
-          // [MQTT SEND]
-          sendRelayCommand(sw.channelIndex - 1, true);
+          // [MQTT SEND] Odešleme sepnutí i s přesnou dobou zpoždění pro autonomní běh ESP32
+          sendRelayCommand(sw.channelIndex - 1, true, baseDuration);
           return {
             ...sw,
             isOn: true,
@@ -483,6 +559,9 @@ export default function App() {
             ? baseDuration
             : sw.remainingSeconds + baseDuration;
 
+        // [MQTT SEND] Odešleme aktualizovaný zbývající čas do ESP32
+        sendRelayCommand(sw.channelIndex - 1, true, nextRemaining);
+
         return {
           ...sw,
           currentRepeats: nextRepeats,
@@ -498,9 +577,14 @@ export default function App() {
     }
   };
 
-  // 2s Long Press strict reset to default state (OFF, cancels timer & repeats)
+  // 1.5s Long Press strict reset to default state (OFF, cancels timer & repeats)
   const handleLongPressReset = (id: string) => {
     const currentSw = switches.find((s) => s.id === id);
+    if (currentSw) {
+      // [MQTT SEND] Okamžitě vypnout relé na ESP32
+      sendRelayCommand(currentSw.channelIndex - 1, false);
+    }
+
     setSwitches((prev) =>
       prev.map((sw) => {
         if (sw.id !== id) return sw;
@@ -545,6 +629,14 @@ export default function App() {
   // Update switch properties from Settings modal
   const handleUpdateSwitch = (updated: SwitchItem) => {
     setSwitches((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    // [MQTT SEND CONFIG] Odešleme novou konfiguraci do paměti NVS v ESP32
+    sendRelayConfig(
+      updated.channelIndex - 1,
+      updated.delayConfig.enabled,
+      updated.delayConfig.durationSeconds,
+      updated.maxRuntimeGuardMinutes || 0,
+      updated.powerOnState
+    );
   };
 
   // Schedule handlers
@@ -641,6 +733,7 @@ export default function App() {
         {/* Top App Header with eWeLink styling and Top-Corner Menu */}
         <Header
           deviceStatus={deviceStatus}
+          isOffline={isOffline}
           onOpenSettings={() => {
             setActiveSwitchSettingsId(null);
             setIsSettingsOpen(true);
@@ -664,11 +757,17 @@ export default function App() {
                   <div className="text-sm font-bold text-slate-800 mt-0.5 flex items-center gap-1.5">
                     <span
                       className={`w-2.5 h-2.5 rounded-full ${
-                        activeSwitchesCount > 0 ? 'bg-sky-500 animate-pulse' : 'bg-slate-300'
+                        isOffline
+                          ? 'bg-red-500 animate-ping'
+                          : activeSwitchesCount > 0
+                          ? 'bg-sky-500 animate-pulse'
+                          : 'bg-slate-300'
                       }`}
                     />
                     <span>
-                      {activeSwitchesCount} z {visibleSwitches.length} sepnuto
+                      {isOffline
+                        ? 'Bez odezvy (Offline)'
+                        : `${activeSwitchesCount} z ${visibleSwitches.length} sepnuto`}
                     </span>
                   </div>
                 </div>
@@ -697,17 +796,28 @@ export default function App() {
               {/* Switches Grid / List with compact separation */}
               <div className="space-y-2.5">
                 {visibleSwitches.length === 0 ? (
-                  <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 text-slate-500">
-                    <p className="text-sm font-semibold">Všechny spínače jsou skryté</p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Otevřete horní menu "Nastavení" a aktivujte viditelnost požadovaných relé.
+                  <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 text-slate-500 shadow-xs">
+                    <p className="text-sm font-bold text-slate-700">Všechny spínače jsou skryté</p>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+                      Na základní ploše není aktivní žádný kanál. Můžete jedním kliknutím zobrazit všech 8 výstupů.
                     </p>
-                    <button
-                      onClick={() => setIsSettingsOpen(true)}
-                      className="mt-3 px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-semibold"
-                    >
-                      Otevřít nastavení
-                    </button>
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        id="btn-show-all-empty-screen"
+                        onClick={() => {
+                          setSwitches(prev => prev.map(s => ({ ...s, visible: true })));
+                        }}
+                        className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition shadow-xs active:scale-95"
+                      >
+                        Zobrazit všech 8 kanálů
+                      </button>
+                      <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition active:scale-95"
+                      >
+                        Otevřít nastavení
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   visibleSwitches.map((item) => (
@@ -715,6 +825,7 @@ export default function App() {
                       key={item.id}
                       item={item}
                       schedules={schedules}
+                      isOffline={isOffline}
                       onToggle={handleToggleSwitch}
                       onLongPressReset={handleLongPressReset}
                       onOpenItemSettings={(id) => {
@@ -742,7 +853,13 @@ export default function App() {
 
           {/* TAB 3: ESP32 HARDWARE A SENZORY */}
           {activeTab === 'esp32' && (
-            <HardwareInfoView mode="esp32" deviceStatus={deviceStatus} switches={switches} />
+            <HardwareInfoView
+              mode="esp32"
+              deviceStatus={deviceStatus}
+              switches={switches}
+              isOffline={isOffline}
+              onUpdateDeviceStatus={(updated) => setDeviceStatus(updated)}
+            />
           )}
         </main>
 

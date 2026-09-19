@@ -26,7 +26,13 @@ export function useMqtt() {
 
     client.on('connect', () => {
       setIsConnected(true);
-      client.subscribe(TOPIC_TELEMETRY, { qos: 1 });
+      client.subscribe(TOPIC_TELEMETRY, { qos: 1 }, () => {
+        // Po navázání spojení ihned vyžádáme skutečný aktuální stav relé a senzorů z ESP32
+        client.publish(TOPIC_CMD, JSON.stringify({
+          target_id: "esp_01_kotelna",
+          event: "get_status"
+        }), { qos: 1 });
+      });
     });
 
     client.on('reconnect', () => {
@@ -65,17 +71,43 @@ export function useMqtt() {
     };
   }, []);
 
-  const sendRelayCommand = (index: number, state: boolean) => {
+  const sendRelayCommand = (index: number, state: boolean, durationSec?: number) => {
     if (!mqttClientRef.current || !isConnected) return;
-    const payload = {
+    const payload: any = {
       target_id: "esp_01_kotelna",
       event: "set_relay",
       rele_index: index,
       state: state ? 1 : 0
     };
+    if (durationSec !== undefined && durationSec > 0) {
+      payload.duration = durationSec;
+    }
     // Změna na QoS 1 pro garantované doručení
     mqttClientRef.current.publish(TOPIC_CMD, JSON.stringify(payload), { qos: 1 });
   };
 
-  return { isConnected, telemetry, sendRelayCommand };
+  const sendRelayConfig = (index: number, isDelay: boolean, delaySec: number, guardMin: number, powerOn: string) => {
+    if (!mqttClientRef.current || !isConnected) return;
+    const payload = {
+      target_id: "esp_01_kotelna",
+      event: "config_relay",
+      rele_index: index,
+      is_delay: isDelay,
+      delay_sec: delaySec,
+      max_guard_min: guardMin,
+      power_on: powerOn
+    };
+    mqttClientRef.current.publish(TOPIC_CMD, JSON.stringify(payload), { qos: 1 });
+  };
+
+  const requestStatus = () => {
+    if (!mqttClientRef.current || !isConnected) return;
+    const payload = {
+      target_id: "esp_01_kotelna",
+      event: "get_status"
+    };
+    mqttClientRef.current.publish(TOPIC_CMD, JSON.stringify(payload), { qos: 1 });
+  };
+
+  return { isConnected, telemetry, sendRelayCommand, sendRelayConfig, requestStatus };
 }
