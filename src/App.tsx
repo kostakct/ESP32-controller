@@ -106,7 +106,17 @@ export default function App() {
   const [deviceStatus, setDeviceStatus] = useState<ESP32DeviceStatus>(INITIAL_DEVICE_STATUS);
 
   // Custom MQTT Hook
-  const { isConnected, telemetry, sendRelayCommand, sendRelayConfig, requestStatus } = useMqtt();
+  const {
+    isConnected,
+    telemetry,
+    schedules: espSchedules,
+    sendRelayCommand,
+    sendRelayConfig,
+    requestStatus,
+    requestSchedules,
+    sendSaveSchedule,
+    sendDeleteSchedule,
+  } = useMqtt();
 
   // Stav online/offline na základě MQTT konektivity
   const isOffline = !isConnected;
@@ -119,20 +129,13 @@ export default function App() {
   useEffect(() => {
     if (telemetry) {
       if (telemetry.event === 'boot') {
-        // ESP se probudilo / restartovalo
+        // ESP se probudilo / restartovalo. DŮLEŽITÉ: ESP32 NVS je jediný zdroj
+        // pravdy pro konfiguraci (delay, guard, power-on) - appka už mu ji sem
+        // záměrně nepřeposílá, jinak by po každém rebootu přepsala to, co má
+        // ESP32 reálně uložené, svou vlastní (potenciálně starou) kopií.
         setDeviceStatus(prev => ({ ...prev, online: true, lastSeenTimestamp: Date.now() }));
-        // Zašleme do ESP32 konfiguraci pro všech 8 relé (delay, guard, power-on stav)
-        switchesRef.current.forEach(sw => {
-          sendRelayConfig(
-            sw.channelIndex - 1,
-            sw.delayConfig.enabled,
-            sw.delayConfig.durationSeconds,
-            sw.maxRuntimeGuardMinutes || 0,
-            sw.powerOnState
-          );
-        });
-        // Vyžádáme si okamžitou telemetrii stavu z hardware
         requestStatus();
+        requestSchedules();
       } else if (telemetry.event === 'telemetry' || telemetry.event === 'status_response') {
         setDeviceStatus(prev => ({
           ...prev,
@@ -144,6 +147,34 @@ export default function App() {
           am2320Hum: telemetry.am2320_hum ?? prev.am2320Hum,
           ldr: telemetry.ldr ?? prev.ldr,
         }));
+
+        // ZPĚTNÁ SYNCHRONIZACE KONFIGURACE: ESP32 posílá i svou aktuální NVS
+        // konfiguraci (ne jen on/off stav) - appka si podle ní opraví zobrazené
+        // nastavení, nikdy naopak. Pole chybí u firmwaru, který tuto sekci
+        // (cfg_*) ještě neposílá - pak se konfigurace jednoduše nezmění.
+        if (Array.isArray(telemetry.cfg_delay_en)) {
+          setSwitches(prev =>
+            prev.map(sw => {
+              const idx = sw.channelIndex - 1;
+              const delayEn = telemetry.cfg_delay_en?.[idx];
+              const delaySec = telemetry.cfg_delay_sec?.[idx];
+              const guardMin = telemetry.cfg_guard_min?.[idx];
+              const ponRaw = telemetry.cfg_power_on?.[idx];
+              if (delayEn === undefined) return sw;
+              const ponMap: Record<number, SwitchItem['powerOnState']> = { 0: 'OFF', 1: 'ON', 2: 'KEEP_LAST' };
+              return {
+                ...sw,
+                delayConfig: {
+                  ...sw.delayConfig,
+                  enabled: Boolean(delayEn),
+                  durationSeconds: typeof delaySec === 'number' ? delaySec : sw.delayConfig.durationSeconds,
+                },
+                maxRuntimeGuardMinutes: typeof guardMin === 'number' ? guardMin : sw.maxRuntimeGuardMinutes,
+                powerOnState: ponMap[ponRaw] ?? sw.powerOnState,
+              };
+            })
+          );
+        }
 
         // ZPĚTNÁ SYNCHRONIZACE: Načtení skutečného stavu hardware z ESP32 do aplikace
         // ESP32 je pánem reálného stavu - aplikace převezme skutečnost z HW
@@ -375,13 +406,14 @@ export default function App() {
           if (sw.isOn && sw.isDelayRunning && sw.remainingSeconds > 0) {
             const nextSec = Math.max(0, sw.remainingSeconds - 0.2);
             if (nextSec <= 0) {
-              // Time expired! Switch OFF, reset repeat count to 1
+              // Čas vypršel jen VIZUÁLNĚ v appce. Reálné vypnutí provádí
+              // autonomně ESP32 (vlastní millis() časovač) a pošle telemetrii
+              // zpět - appka už sem záměrně neposílá vlastní duplicitní OFF
+              // příkaz, aby nemohlo dojít k rozjetí dvou nezávislých časů.
               changed = true;
               if (!expiredSwitchToNotify) {
                 expiredSwitchToNotify = sw;
               }
-              // [MQTT SEND]
-              sendRelayCommand(sw.channelIndex - 1, false);
               return {
                 ...sw,
                 isOn: false,
@@ -412,86 +444,64 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Scheduler interval (checks current minute)
-  const lastCheckedMinute = useRef<string>('');
-  const lastTriggeredScheduleKeys = useRef<Set<string>>(new Set());
+  // ČASOVAČE: DŮLEŽITÁ ZMĚNA OPROTI PŮVODNÍ VERZI
+  // -------------------------------------------------------------------------
+  // Původně appka sama každou vteřinu porovnávala čas v prohlížeči (setInterval)
+  // a při shodě poslala příkaz. To fungovalo JEN dokud byla appka otevřená a
+  // aktivní na popředí - jakmile se telefon uzamkl nebo appka šla na pozadí,
+  // mobilní prohlížeč tyto časovače uspí/zastaví a naplánovaná akce se vůbec
+  // neprovede. Časovače teď vyhodnocuje výhradně ESP32 samo (má vlastní čas
+  // z NTP a seznam uložený v NVS) - appka je jen editor, který posílá/maže
+  // položky a zobrazuje aktuální seznam z ESP32.
+  // -------------------------------------------------------------------------
 
+  // Převod bitmasky dní (bit0=Ne..bit6=So) na pole čísel 0-6 a zpět
+  const daysMaskToArray = (mask: number): number[] => {
+    const days: number[] = [];
+    for (let i = 0; i < 7; i++) if (mask & (1 << i)) days.push(i);
+    return days;
+  };
+  const daysArrayToMask = (days: number[]): number =>
+    days.reduce((mask, d) => mask | (1 << d), 0);
+
+  // Sync: seznam časovačů z ESP32 (autorita) -> zobrazovaný stav appky
   useEffect(() => {
-    const checkSchedule = () => {
-      const now = new Date();
-      const currentDay = now.getDay(); // 0 = Sun, 1 = Mon ...
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
-      const timeKey = `${now.toDateString()} ${hh}:${mm}`;
+    setSchedules((prev) =>
+      espSchedules.map((esp) => {
+        const targetSwitch = switches.find((s) => s.channelIndex - 1 === esp.relay_index);
+        const existing = prev.find((p) => p.espSlot === esp.slot);
+        return {
+          id: existing?.id ?? `esp_slot_${esp.slot}`,
+          espSlot: esp.slot,
+          switchId: targetSwitch?.id ?? '',
+          time: `${String(esp.hour).padStart(2, '0')}:${String(esp.minute).padStart(2, '0')}`,
+          action: esp.action,
+          enabled: esp.enabled,
+          repeatType: esp.repeat_type,
+          customDays: esp.repeat_type === 'CUSTOM' ? daysMaskToArray(esp.days_mask) : [],
+        };
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [espSchedules, switches]);
 
-      if (lastCheckedMinute.current !== timeKey) {
-        lastCheckedMinute.current = timeKey;
-        lastTriggeredScheduleKeys.current.clear();
-      }
+  // Vyžádat aktuální seznam časovačů hned po připojení k brokeru
+  useEffect(() => {
+    if (isConnected) requestSchedules();
+  }, [isConnected]);
 
-      schedules.forEach((sch) => {
-        if (!sch.enabled) return;
-        if (sch.time !== `${hh}:${mm}`) return;
-        if (lastTriggeredScheduleKeys.current.has(sch.id)) return;
-
-        // Check day match
-        let dayMatches = false;
-        if (sch.repeatType === 'ONCE') dayMatches = true;
-        else if (sch.repeatType === 'DAILY') dayMatches = true;
-        else if (sch.repeatType === 'WEEKDAYS') dayMatches = currentDay >= 1 && currentDay <= 5;
-        else if (sch.repeatType === 'WEEKENDS') dayMatches = currentDay === 0 || currentDay === 6;
-        else if (sch.repeatType === 'CUSTOM') dayMatches = sch.customDays.includes(currentDay);
-
-        if (dayMatches) {
-          lastTriggeredScheduleKeys.current.add(sch.id);
-          triggerScheduleAction(sch);
-        }
-      });
-    };
-
-    const interval = setInterval(checkSchedule, 1000);
-
-    // Při probuzení aplikace na telefonu ihned zkontrolovat plánovače
-    const handleWakeCheck = () => {
-      if (document.visibilityState === 'visible') {
-        checkSchedule();
-      }
-    };
-    document.addEventListener('visibilitychange', handleWakeCheck);
-
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleWakeCheck);
-    };
-  }, [schedules, switches]);
-
-  // Trigger a schedule action
+  // Ruční okamžité vyzkoušení akce časovače (tlačítko "test" v UI), NE
+  // pravidelné automatické spouštění - to dělá výhradně ESP32.
   const triggerScheduleAction = (sch: ScheduleItem) => {
     const target = switches.find((s) => s.id === sch.switchId);
     if (!target) return;
 
     const nextState = sch.action === 'ON';
-    // [MQTT SEND]
     sendRelayCommand(target.channelIndex - 1, nextState);
-    setSwitches((prev) =>
-      prev.map((s) => {
-        if (s.id === sch.switchId) {
-          return {
-            ...s,
-            isOn: nextState,
-            isDelayRunning: false,
-            remainingSeconds: 0,
-            currentRepeats: 1,
-          };
-        }
-        return s;
-      })
-    );
 
-    // Notify strictly 1x outside state updater
     notify(
-      `Časovač: ${target.name}`,
-      `Plánovač provedl akci: ${sch.action === 'ON' ? 'ZAPNUTO (ON)' : 'VYPNUTO (OFF)'} dle času ${sch.time}.`,
+      `Časovač (test): ${target.name}`,
+      `Ručně vyzkoušená akce: ${sch.action === 'ON' ? 'ZAPNUTO (ON)' : 'VYPNUTO (OFF)'}.`,
       target.id,
       'SCHEDULE'
     );
@@ -652,25 +662,39 @@ export default function App() {
     );
   };
 
-  // Schedule handlers
-  const handleToggleSchedule = (id: string) => {
-    setSchedules((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s))
-    );
-  };
-
-  const handleSaveSchedule = (newOrUpdated: ScheduleItem) => {
-    setSchedules((prev) => {
-      const exists = prev.some((s) => s.id === newOrUpdated.id);
-      if (exists) {
-        return prev.map((s) => (s.id === newOrUpdated.id ? newOrUpdated : s));
-      }
-      return [...prev, newOrUpdated];
+  // Schedule handlers - vše se posílá na ESP32; zobrazený seznam (kap. výše)
+  // se pak sám přepíše, jakmile ESP32 pošle zpět aktualizovaný schedules_response.
+  const sendScheduleToEsp = (sch: ScheduleItem) => {
+    const targetSwitch = switches.find((s) => s.id === sch.switchId);
+    if (!targetSwitch) return;
+    const [hh, mm] = sch.time.split(':').map((n) => parseInt(n, 10));
+    sendSaveSchedule({
+      slot: sch.espSlot,
+      relay_index: targetSwitch.channelIndex - 1,
+      hour: hh || 0,
+      minute: mm || 0,
+      action: sch.action,
+      repeat_type: sch.repeatType,
+      days_mask: daysArrayToMask(sch.customDays),
+      enabled: sch.enabled,
     });
   };
 
+  const handleToggleSchedule = (id: string) => {
+    const current = schedules.find((s) => s.id === id);
+    if (!current) return;
+    sendScheduleToEsp({ ...current, enabled: !current.enabled });
+  };
+
+  const handleSaveSchedule = (newOrUpdated: ScheduleItem) => {
+    sendScheduleToEsp(newOrUpdated);
+  };
+
   const handleDeleteSchedule = (id: string) => {
-    setSchedules((prev) => prev.filter((s) => s.id !== id));
+    const current = schedules.find((s) => s.id === id);
+    if (current?.espSlot !== undefined) {
+      sendDeleteSchedule(current.espSlot);
+    }
   };
 
   // Master All ON / All OFF controls

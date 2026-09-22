@@ -35,9 +35,15 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     initialSchedule ? initialSchedule.enabled : true
   );
 
-  // Synchronizovat stav formuláře při každém otevření nebo změně initialSchedule
+  // Synchronizovat stav formuláře POUZE při otevření okna nebo při změně editovaného záznamu
+  const prevOpenRef = React.useRef(false);
+  const prevScheduleIdRef = React.useRef<string | null | undefined>(undefined);
+
   React.useEffect(() => {
-    if (isOpen) {
+    const justOpened = isOpen && !prevOpenRef.current;
+    const scheduleChanged = isOpen && initialSchedule?.id !== prevScheduleIdRef.current;
+
+    if (justOpened || scheduleChanged) {
       if (initialSchedule) {
         setSwitchId(initialSchedule.switchId);
         setTime(initialSchedule.time);
@@ -54,7 +60,10 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         setEnabled(true);
       }
     }
-  }, [isOpen, initialSchedule, switches]);
+
+    prevOpenRef.current = isOpen;
+    prevScheduleIdRef.current = initialSchedule?.id;
+  }, [isOpen, initialSchedule?.id]);
 
   if (!isOpen) return null;
 

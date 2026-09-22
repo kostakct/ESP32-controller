@@ -7,9 +7,23 @@ const MQTT_PASS = 'RostaTest';
 const TOPIC_CMD = 'kostakct/esp32/cmd';
 const TOPIC_TELEMETRY = 'kostakct/esp32/telemetry';
 
+// Surová podoba časovače tak, jak ho posílá a ukládá ESP32 (NVS slot, ne UI id).
+export interface EspSchedule {
+  slot: number;
+  relay_index: number; // 0-7
+  hour: number;
+  minute: number;
+  action: 'ON' | 'OFF';
+  repeat_type: 'ONCE' | 'DAILY' | 'WEEKDAYS' | 'WEEKENDS' | 'CUSTOM';
+  days_mask: number; // bit0=Ne ... bit6=So, jen pro CUSTOM
+  enabled: boolean;
+}
+
 export function useMqtt() {
   const [isConnected, setIsConnected] = useState(false);
   const [telemetry, setTelemetry] = useState<any>(null);
+  // Autoritativní seznam časovačů, jak je má aktuálně uložené ESP32 v NVS.
+  const [schedules, setSchedules] = useState<EspSchedule[]>([]);
   const mqttClientRef = useRef<mqtt.MqttClient | null>(null);
   // Fronta neodeslaných zpráv při odpojení/uspání aplikace
   const pendingQueueRef = useRef<Array<{ topic: string; message: string; qos: 0 | 1 | 2 }>>([]);
@@ -59,6 +73,12 @@ export function useMqtt() {
           target_id: "esp_01_kotelna",
           event: "get_status"
         }), { qos: 1 });
+
+        // 3. A rovnou i aktuální seznam časovačů uložených v ESP32 (NVS je zdroj pravdy)
+        client.publish(TOPIC_CMD, JSON.stringify({
+          target_id: "esp_01_kotelna",
+          event: "get_schedules"
+        }), { qos: 1 });
       });
     });
 
@@ -74,7 +94,12 @@ export function useMqtt() {
       try {
         const data = JSON.parse(message.toString());
         if (topic === TOPIC_TELEMETRY) {
-          setTelemetry(data);
+          if (data.event === 'schedules_response' && Array.isArray(data.schedules)) {
+            // Samostatný kanál stavu - ESP32 je jediný zdroj pravdy pro časovače.
+            setSchedules(data.schedules);
+          } else {
+            setTelemetry(data);
+          }
         }
       } catch (err) {
         console.warn('Failed to parse MQTT message payload', err);
@@ -163,5 +188,48 @@ export function useMqtt() {
     safePublish(TOPIC_CMD, JSON.stringify(payload), 1);
   };
 
-  return { isConnected, telemetry, sendRelayCommand, sendRelayConfig, requestStatus };
+  const requestSchedules = () => {
+    safePublish(TOPIC_CMD, JSON.stringify({
+      target_id: "esp_01_kotelna",
+      event: "get_schedules"
+    }), 1);
+  };
+
+  // slot: undefined/-1 = nová položka (ESP sám přidělí první volný slot a pošle
+  // zpět aktualizovaný seznam), jinak přepíše existující slot.
+  const sendSaveSchedule = (schedule: Omit<EspSchedule, 'slot'> & { slot?: number }) => {
+    const payload = {
+      target_id: "esp_01_kotelna",
+      event: "save_schedule",
+      slot: schedule.slot ?? -1,
+      relay_index: schedule.relay_index,
+      hour: schedule.hour,
+      minute: schedule.minute,
+      action: schedule.action,
+      repeat_type: schedule.repeat_type,
+      days_mask: schedule.days_mask,
+      enabled: schedule.enabled,
+    };
+    safePublish(TOPIC_CMD, JSON.stringify(payload), 1);
+  };
+
+  const sendDeleteSchedule = (slot: number) => {
+    safePublish(TOPIC_CMD, JSON.stringify({
+      target_id: "esp_01_kotelna",
+      event: "delete_schedule",
+      slot,
+    }), 1);
+  };
+
+  return {
+    isConnected,
+    telemetry,
+    schedules,
+    sendRelayCommand,
+    sendRelayConfig,
+    requestStatus,
+    requestSchedules,
+    sendSaveSchedule,
+    sendDeleteSchedule,
+  };
 }

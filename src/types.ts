@@ -38,6 +38,9 @@ export interface ScheduleItem {
   enabled: boolean;
   repeatType: ScheduleRepeatType;
   customDays: number[]; // 0 = Sun, 1 = Mon, 2 = Tue, ..., 6 = Sat
+  // Index NVS slotu na ESP32 (0..MAX_SCHEDULES-1). ESP32 je autoritativní zdroj
+  // pravdy pro časovače - undefined jen krátce, než ESP potvrdí uložení nové položky.
+  espSlot?: number;
 }
 
 export interface ESP32DeviceStatus {
