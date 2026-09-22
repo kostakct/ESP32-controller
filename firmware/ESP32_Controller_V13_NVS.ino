@@ -25,10 +25,10 @@
 const char* ssid = "VAS_NAZEV_WIFI";       // Zadejte název své WiFi
 const char* password = "VASE_HESLO_WIFI";  // Zadejte heslo své WiFi
 
-const char* mqtt_server = "2aa867b8a86d4479b320828c9dd8d271.s1.eu.hivemq.cloud"; 
+const char* mqtt_server = "VLOZ URL"; 
 const int   mqtt_port = 8883;                   
-const char* mqtt_user = "Rosta-IoT";          
-const char* mqtt_pass = "RostaTest";         
+const char* mqtt_user = "Vloz UserT";          
+const char* mqtt_pass = "Vloz Pass";         
 
 const char* topic_cmd = "kostakct/esp32/cmd";
 const char* topic_telemetry = "kostakct/esp32/telemetry";
