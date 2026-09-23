@@ -111,6 +111,7 @@ export default function App() {
     telemetry,
     schedules: espSchedules,
     scheduleCommandError,
+    lastMqttEvent,
     sendRelayCommand,
     sendRelayConfig,
     requestStatus,
@@ -808,6 +809,15 @@ export default function App() {
           isPhoneFrame={isPhoneFrame}
           onTogglePhoneFrame={() => setIsPhoneFrame(!isPhoneFrame)}
         />
+
+        {/* DIAGNOSTIKA MQTT SPOJENÍ - viditelná přímo na telefonu, bez nutnosti
+            DevTools konzole. Zobrazuje se jen dokud appka není plně online,
+            ať v běžném provozu nepřekáží. */}
+        {isOffline && (
+          <div className="px-3 py-1.5 bg-red-50 border-b border-red-200 text-[11px] text-red-700 font-mono break-words">
+            {lastMqttEvent}
+          </div>
+        )}
 
         {/* Scrollable View Area - optimized for smooth mobile touch pan */}
         <main className="flex-1 min-h-0 overflow-y-auto pb-4 touch-pan-y overscroll-y-contain">
