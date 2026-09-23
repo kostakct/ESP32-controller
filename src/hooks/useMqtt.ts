@@ -73,9 +73,13 @@ export function useMqtt() {
     client.on('connect', () => {
       setIsConnected(true);
       logEvent('Připojeno k brokeru (HiveMQ)');
-      client.subscribe(TOPIC_TELEMETRY, { qos: 1 }, (subErr) => {
+      client.subscribe(TOPIC_TELEMETRY, { qos: 1 }, (subErr, granted) => {
         if (subErr) {
           logEvent(`Chyba při přihlášení k odběru telemetrie: ${subErr.message || subErr}`);
+        } else if (granted && granted.some((g) => g.qos === 128)) {
+          logEvent('ODMÍTNUTO: broker odmítl přihlášení k odběru topicu telemetry (chybí oprávnění Subscribe pro tento účet v HiveMQ ACL?)');
+        } else {
+          logEvent('Přihlášeno k odběru telemetry, čekám na první zprávu z ESP32...');
         }
         // 1. Po navázání spojení ihned odešleme veškeré čekající zprávy/konfigurace z fronty
         while (pendingQueueRef.current.length > 0) {
@@ -122,12 +126,17 @@ export function useMqtt() {
               window.clearTimeout(scheduleAckTimeoutRef.current);
               scheduleAckTimeoutRef.current = null;
             }
+            logEvent(`Přijata zpráva: schedules_response (${data.schedules.length} položek)`);
           } else {
+            const hasRelays = Array.isArray(data.relays);
+            logEvent(`Přijata zpráva: event=${data.event ?? '?'}${hasRelays ? ' (obsahuje relays[])' : ' (BEZ relays[]!)'}`);
             setTelemetry(data);
           }
+        } else {
+          logEvent(`Zpráva na neočekávaném topicu: ${topic}`);
         }
       } catch (err) {
-        console.warn('Failed to parse MQTT message payload', err);
+        logEvent(`Chyba při zpracování přijaté zprávy: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
 
