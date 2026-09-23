@@ -33,6 +33,16 @@ export function useMqtt() {
   // Fronta neodeslaných zpráv při odpojení/uspání aplikace
   const pendingQueueRef = useRef<Array<{ topic: string; message: string; qos: 0 | 1 | 2 }>>([]);
 
+  // DIAGNOSTIKA VIDITELNÁ PŘÍMO V APPCE (na telefonu se DevTools konzole
+  // nedá jednoduše otevřít) - poslední MQTT událost + čas, kdy nastala.
+  // Zobrazuje se malým textem pod stavovou ikonou, viz App.tsx.
+  const [lastMqttEvent, setLastMqttEvent] = useState<string>('Appka se ještě nepokusila připojit');
+  const logEvent = (msg: string) => {
+    const time = new Date().toLocaleTimeString('cs-CZ');
+    console.log(`[MQTT] ${msg}`);
+    setLastMqttEvent(`${time} — ${msg}`);
+  };
+
   // Funkce pro bezpečné odeslání do MQTT s frontou pro případ offline
   const safePublish = (topic: string, message: string, qos: 0 | 1 | 2 = 1) => {
     if (mqttClientRef.current && mqttClientRef.current.connected) {
@@ -62,8 +72,11 @@ export function useMqtt() {
 
     client.on('connect', () => {
       setIsConnected(true);
-      console.log('[MQTT] Připojeno k brokeru');
-      client.subscribe(TOPIC_TELEMETRY, { qos: 1 }, () => {
+      logEvent('Připojeno k brokeru (HiveMQ)');
+      client.subscribe(TOPIC_TELEMETRY, { qos: 1 }, (subErr) => {
+        if (subErr) {
+          logEvent(`Chyba při přihlášení k odběru telemetrie: ${subErr.message || subErr}`);
+        }
         // 1. Po navázání spojení ihned odešleme veškeré čekající zprávy/konfigurace z fronty
         while (pendingQueueRef.current.length > 0) {
           const item = pendingQueueRef.current.shift();
@@ -89,10 +102,12 @@ export function useMqtt() {
 
     client.on('reconnect', () => {
       setIsConnected(false);
+      logEvent('Pokouším se znovu připojit (reconnect)...');
     });
 
     client.on('offline', () => {
       setIsConnected(false);
+      logEvent('Klient offline (broker nedostupný / ztráta sítě)');
     });
 
     client.on('message', (topic, message) => {
@@ -116,10 +131,16 @@ export function useMqtt() {
       }
     });
 
-    client.on('close', () => setIsConnected(false));
-    client.on('error', (err) => {
-      console.warn('[MQTT] Connection notice:', err.message || err);
+    client.on('close', () => {
       setIsConnected(false);
+      logEvent('Spojení uzavřeno (close)');
+    });
+    client.on('error', (err: any) => {
+      setIsConnected(false);
+      // U MQTT přes WebSocket bývá nejužitečnější info přímo v err.message,
+      // případně v err.code (např. "Connection refused: Not authorized" apod.)
+      const detail = err?.message || err?.code || JSON.stringify(err) || 'neznámá chyba';
+      logEvent(`CHYBA spojení: ${detail}`);
     });
 
     mqttClientRef.current = client;
@@ -252,6 +273,7 @@ export function useMqtt() {
     telemetry,
     schedules,
     scheduleCommandError,
+    lastMqttEvent,
     sendRelayCommand,
     sendRelayConfig,
     requestStatus,
