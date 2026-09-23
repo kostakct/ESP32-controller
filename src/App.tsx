@@ -110,6 +110,7 @@ export default function App() {
     isConnected,
     telemetry,
     schedules: espSchedules,
+    scheduleCommandError,
     sendRelayCommand,
     sendRelayConfig,
     requestStatus,
@@ -118,8 +119,21 @@ export default function App() {
     sendDeleteSchedule,
   } = useMqtt();
 
-  // Stav online/offline na základě MQTT konektivity
-  const isOffline = !isConnected;
+  // Stav online/offline: NESTAČÍ, aby appka byla jen připojená k MQTT brokeru -
+  // dokud nepřijde alespoň jedna SKUTEČNÁ telemetrie s reálným stavem výstupů
+  // z ESP32, appka nesmí nic z lokální/domnělé paměti prezentovat jako platné
+  // ("obnova appky nemůže tvrdit ON, když ESP má výstup reálně OFF").
+  const [hasRealStatus, setHasRealStatus] = useState(false);
+  const isOffline = !isConnected || !hasRealStatus;
+
+  // Jakmile appka o spojení přijde, je nutné znovu počkat na novou, potvrzenou
+  // telemetrii po opětovném připojení - stará data už neplatí jako jistota.
+  useEffect(() => {
+    if (!isConnected) setHasRealStatus(false);
+  }, [isConnected]);
+
+  const hasRealStatusRef = useRef(hasRealStatus);
+  useEffect(() => { hasRealStatusRef.current = hasRealStatus; }, [hasRealStatus]);
 
   // Ref pro přístup k aktuálnímu stavu spínačů uvnitř MQTT efektu bez zacyklení
   const switchesRef = useRef(switches);
@@ -179,6 +193,9 @@ export default function App() {
         // ZPĚTNÁ SYNCHRONIZACE: Načtení skutečného stavu hardware z ESP32 do aplikace
         // ESP32 je pánem reálného stavu - aplikace převezme skutečnost z HW
         if (telemetry.relays && Array.isArray(telemetry.relays)) {
+          // Teprve TEĎ máme jistotu - od této chvíle appka smí opustit
+          // "offline/neznámý" stav a zobrazovat reálné hodnoty.
+          setHasRealStatus(true);
           setSwitches(prev =>
             prev.map(sw => {
               const hwVal = telemetry.relays[sw.channelIndex - 1];
@@ -398,6 +415,11 @@ export default function App() {
   // Timer Tick Interval (running every 200ms to handle smooth 0.5s decrements)
   useEffect(() => {
     const interval = setInterval(() => {
+      // Dokud nemáme potvrzenou reálnou telemetrii z ESP32, appka nesmí
+      // vizuálně "dokončovat" odpočet podle staré/domnělé hodnoty z paměti -
+      // počká, až přijde skutečný stav, a teprve pak z něj vychází.
+      if (!hasRealStatusRef.current) return;
+
       let expiredSwitchToNotify: SwitchItem | null = null;
 
       setSwitches((prevSwitches) => {
@@ -661,6 +683,13 @@ export default function App() {
       updated.powerOnState
     );
   };
+
+  useEffect(() => {
+    if (scheduleCommandError) {
+      notify('Časovač se neuložil', scheduleCommandError, 'system', 'SCHEDULE');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleCommandError]);
 
   // Schedule handlers - vše se posílá na ESP32; zobrazený seznam (kap. výše)
   // se pak sám přepíše, jakmile ESP32 pošle zpět aktualizovaný schedules_response.

@@ -24,6 +24,11 @@ export function useMqtt() {
   const [telemetry, setTelemetry] = useState<any>(null);
   // Autoritativní seznam časovačů, jak je má aktuálně uložené ESP32 v NVS.
   const [schedules, setSchedules] = useState<EspSchedule[]>([]);
+  // Pokud ESP32 na uložení/smazání časovače vůbec nezareaguje (typicky proto,
+  // že běží starší firmware bez podpory "save_schedule"/"get_schedules"),
+  // appka to po pár vteřinách nahlásí místo tichého selhání.
+  const [scheduleCommandError, setScheduleCommandError] = useState<string | null>(null);
+  const scheduleAckTimeoutRef = useRef<number | null>(null);
   const mqttClientRef = useRef<mqtt.MqttClient | null>(null);
   // Fronta neodeslaných zpráv při odpojení/uspání aplikace
   const pendingQueueRef = useRef<Array<{ topic: string; message: string; qos: 0 | 1 | 2 }>>([]);
@@ -97,6 +102,11 @@ export function useMqtt() {
           if (data.event === 'schedules_response' && Array.isArray(data.schedules)) {
             // Samostatný kanál stavu - ESP32 je jediný zdroj pravdy pro časovače.
             setSchedules(data.schedules);
+            setScheduleCommandError(null);
+            if (scheduleAckTimeoutRef.current !== null) {
+              window.clearTimeout(scheduleAckTimeoutRef.current);
+              scheduleAckTimeoutRef.current = null;
+            }
           } else {
             setTelemetry(data);
           }
@@ -211,6 +221,7 @@ export function useMqtt() {
       enabled: schedule.enabled,
     };
     safePublish(TOPIC_CMD, JSON.stringify(payload), 1);
+    armScheduleAckWatchdog();
   };
 
   const sendDeleteSchedule = (slot: number) => {
@@ -219,12 +230,28 @@ export function useMqtt() {
       event: "delete_schedule",
       slot,
     }), 1);
+    armScheduleAckWatchdog();
   };
+
+  function armScheduleAckWatchdog() {
+    setScheduleCommandError(null);
+    if (scheduleAckTimeoutRef.current !== null) {
+      window.clearTimeout(scheduleAckTimeoutRef.current);
+    }
+    scheduleAckTimeoutRef.current = window.setTimeout(() => {
+      setScheduleCommandError(
+        'ESP32 nepotvrdilo uložení časovače do 4 vteřin. Nejpravděpodobnější příčina: ' +
+        'na desce ještě neběží firmware v14 s podporou časovačů (save_schedule/get_schedules) ' +
+        '- zkontroluj, že máš nahranou aktuální verzi .ino, a zkus to znovu.'
+      );
+    }, 4000);
+  }
 
   return {
     isConnected,
     telemetry,
     schedules,
+    scheduleCommandError,
     sendRelayCommand,
     sendRelayConfig,
     requestStatus,

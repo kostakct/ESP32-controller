@@ -27,6 +27,9 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 }) => {
   const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // Řazení seznamu: podle času (00:01-24:00 napříč všemi výstupy), nebo
+  // podle výstupu a v rámci něj podle času (OUT1 00:01-24:00, OUT2 ...).
+  const [sortMode, setSortMode] = useState<'TIME' | 'OUTPUT'>('TIME');
 
   // Otevřít modal pokud přišel požadavek z vnějšku (např. z hlavní karty spínače)
   React.useEffect(() => {
@@ -41,6 +44,23 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
   // Map switchId to Switch item
   const switchMap = new Map<string, SwitchItem>(switches.map((s) => [s.id, s]));
+
+  const sortedSchedules = React.useMemo(() => {
+    const withChannel = schedules.map((item) => ({
+      item,
+      channelIndex: switchMap.get(item.switchId)?.channelIndex ?? 999,
+    }));
+    withChannel.sort((a, b) => {
+      if (sortMode === 'OUTPUT') {
+        if (a.channelIndex !== b.channelIndex) return a.channelIndex - b.channelIndex;
+        return a.item.time.localeCompare(b.item.time);
+      }
+      // TIME: čistě podle času 00:01-24:00 napříč všemi výstupy
+      if (a.item.time !== b.item.time) return a.item.time.localeCompare(b.item.time);
+      return a.channelIndex - b.channelIndex;
+    });
+    return withChannel.map((w) => w.item);
+  }, [schedules, sortMode, switches]);
 
   const handleOpenNew = () => {
     setEditingSchedule(null);
@@ -76,6 +96,31 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
         </button>
       </div>
 
+      {/* Sort toggle */}
+      {schedules.length > 1 && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500 font-medium">Řadit:</span>
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            <button
+              onClick={() => setSortMode('TIME')}
+              className={`px-2.5 py-1 font-semibold transition ${
+                sortMode === 'TIME' ? 'bg-sky-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Podle času (00:01–24:00)
+            </button>
+            <button
+              onClick={() => setSortMode('OUTPUT')}
+              className={`px-2.5 py-1 font-semibold border-l border-slate-200 transition ${
+                sortMode === 'OUTPUT' ? 'bg-sky-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              Podle výstupu (OUT1 → OUT8)
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Schedules List */}
       {schedules.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-xs">
@@ -93,7 +138,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
         </div>
       ) : (
         <div className="space-y-3">
-          {schedules.map((item) => {
+          {sortedSchedules.map((item) => {
             const targetSwitch = switchMap.get(item.switchId);
             const switchName = targetSwitch
               ? `${targetSwitch.name} (OUT ${targetSwitch.channelIndex})`
