@@ -259,9 +259,9 @@ export const VariantsView: React.FC = () => {
                   {v.badge}
                 </span>
                 {v.lcd ? (
-                  <Monitor className="w-3.5 h-3.5 text-sky-600 shrink-0" title="Se 4&quot; IPS" />
+                  <span title="Se 4&quot; IPS"><Monitor className="w-3.5 h-3.5 text-sky-600 shrink-0" /></span>
                 ) : (
-                  <Cpu className="w-3.5 h-3.5 text-slate-400 shrink-0" title="Bez displeje" />
+                  <span title="Bez displeje"><Cpu className="w-3.5 h-3.5 text-slate-400 shrink-0" /></span>
                 )}
               </div>
               <h3 className="font-bold text-xs sm:text-sm text-slate-900 leading-tight">

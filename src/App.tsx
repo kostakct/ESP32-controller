@@ -4,6 +4,8 @@ import {
   ScheduleItem,
   ESP32DeviceStatus,
   AppNotification,
+  Role,
+  OutConfig,
 } from './types';
 import {
   INITIAL_SWITCHES,
@@ -19,6 +21,15 @@ import { HardwareInfoView } from './components/HardwareInfoView';
 import { BottomNav, TabType } from './components/BottomNav';
 import { EspCodeModal } from './components/EspCodeModal';
 import { NotificationToast } from './components/NotificationToast';
+import ConfigCard from './components/ConfigCard';
+import { setCatalog } from './components/fixtures';
+import {
+  switchToOutConfig,
+  switchToOutRuntime,
+  extractFirmwareRelevantConfig,
+  persistExtras,
+} from './adapters/outConfigAdapter';
+import { X } from 'lucide-react';
 import { Power, CheckCircle, RotateCcw, Sparkles, FileCode } from 'lucide-react';
 import { formatDuration } from './utils/formatters';
 import { useMqtt } from './hooks/useMqtt';
@@ -279,6 +290,20 @@ export default function App() {
   // Modals state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [activeSwitchSettingsId, setActiveSwitchSettingsId] = useState<string | null>(null);
+  // NOVÝ ROZŠÍŘENÝ EDITOR (ConfigCard) - podle uživatelova návrhu
+  const [advancedEditorSwitchId, setAdvancedEditorSwitchId] = useState<string | null>(null);
+  const [editingRole, setEditingRole] = useState<Role>('admin');
+
+  // Katalog prvků pro výběr termostatického čidla / cíle blokace v ConfigCard -
+  // musí odrážet SKUTEČNÉ prvky, ne ukázková data z původního test-bench souboru.
+  useEffect(() => {
+    setCatalog([
+      ...switches.map((s) => ({ id: s.id, label: `${s.name} (Výstup ${s.channelIndex})` })),
+      { id: 'sensor:onewire1', label: 'OneWire teploměr 1' },
+      { id: 'sensor:onewire2', label: 'OneWire teploměr 2' },
+      { id: 'sensor:am2320', label: 'AM2320 teplota/vlhkost' },
+    ]);
+  }, [switches]);
   const [selectedScheduleForEdit, setSelectedScheduleForEdit] = useState<ScheduleItem | null>(null);
   const [isMobileTestOpen, setIsMobileTestOpen] = useState<boolean>(false);
   const [isEspCodeOpen, setIsEspCodeOpen] = useState<boolean>(false);
@@ -685,6 +710,39 @@ export default function App() {
     );
   };
 
+  // Handler pro nový rozšířený editor (ConfigCard). Vše, co ESP32 zatím
+  // neumí (termostat, interlocky, rychlé zámky, role), se uloží jen lokálně;
+  // podmnožina, které ESP32 rozumí, jde reálně na desku přes handleUpdateSwitch
+  // (stejnou, už otestovanou cestou jako dosavadní rychlé nastavení).
+  const [configCardVersion, setConfigCardVersion] = useState(0);
+  const handleAdvancedConfigChange = (patch: Partial<OutConfig>) => {
+    const sw = switches.find((s) => s.id === advancedEditorSwitchId);
+    if (!sw) return;
+    const currentConfig = switchToOutConfig(sw, 'ESP32-S3 Kotelna');
+    const newConfig: OutConfig = { ...currentConfig, ...patch };
+
+    persistExtras(newConfig);
+
+    const fw = extractFirmwareRelevantConfig(newConfig);
+    handleUpdateSwitch({
+      ...sw,
+      name: newConfig.name,
+      delayConfig: {
+        ...sw.delayConfig,
+        enabled: fw.isDelayEnabled,
+        durationSeconds: fw.delaySeconds,
+        maxRepeats: fw.delayMax,
+      },
+      maxRuntimeGuardMinutes: fw.guardMinutes,
+      powerOnState: fw.powerOn,
+    });
+
+    // Čistě lokální pole (termostat/interlocky/role) se nepromítají do
+    // `switches`, takže ConfigCard musíme "šťouchnout" ručně, ať zobrazí
+    // svá vlastní právě uložená data hned, ne až po další MQTT odpovědi.
+    setConfigCardVersion((v) => v + 1);
+  };
+
   useEffect(() => {
     if (scheduleCommandError) {
       notify('Časovač se neuložil', scheduleCommandError, 'system', 'SCHEDULE');
@@ -963,7 +1021,46 @@ export default function App() {
         onRequestNotificationPermission={requestNotificationPermission}
         notificationPermission={notificationPermission}
         activeSwitchId={activeSwitchSettingsId}
+        onOpenAdvanced={(id) => setAdvancedEditorSwitchId(id)}
       />
+
+      {/* NOVÝ ROZŠÍŘENÝ EDITOR PRVKU (ConfigCard) - termostat, interlocky,
+          rychlé zámky, role. Otevírá se z tlačítka uvnitř SettingsModal. */}
+      {advancedEditorSwitchId && (() => {
+        const sw = switches.find((s) => s.id === advancedEditorSwitchId);
+        if (!sw) return null;
+        const cfg = switchToOutConfig(sw, 'ESP32-S3 Kotelna');
+        const rt = switchToOutRuntime(sw, isOffline);
+        return (
+          <div className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-3">
+            <div className="w-full max-w-md bg-slate-50 rounded-2xl shadow-2xl my-4 relative">
+              <button
+                onClick={() => setAdvancedEditorSwitchId(null)}
+                className="absolute right-3 top-3 z-10 bg-white border border-slate-300 rounded-full p-1.5 shadow-sm hover:bg-slate-100"
+                aria-label="Zavřít pokročilé nastavení"
+              >
+                <X className="w-4 h-4 text-slate-600" />
+              </button>
+              <div className="p-3">
+                <ConfigCard
+                  key={`${sw.id}-${configCardVersion}`}
+                  config={cfg}
+                  runtime={rt}
+                  editingRole={editingRole}
+                  onEditingRoleChange={setEditingRole}
+                  onChange={handleAdvancedConfigChange}
+                />
+              </div>
+              <div className="px-4 pb-2 text-[11px] text-slate-400 leading-snug">
+                Termostat, vzájemné blokace, rychlé zámky a role se zatím ukládají
+                jen v appce (čekají na rozšíření firmwaru / napojení na Supabase).
+                Ostatní nastavení (režim, delay, bezpečné vypnutí, výchozí stav)
+                se odesílá na ESP32 stejně jako v rychlém nastavení.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Mobile Test & Android Install Modal */}
       <MobileTestModal

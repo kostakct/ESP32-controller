@@ -33,6 +33,7 @@ interface SettingsModalProps {
   onRequestNotificationPermission: () => Promise<boolean>;
   notificationPermission: NotificationPermission | 'unsupported';
   activeSwitchId?: string | null;
+  onOpenAdvanced?: (switchId: string) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -44,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRequestNotificationPermission,
   notificationPermission,
   activeSwitchId,
+  onOpenAdvanced,
 }) => {
   const [expandedId, setExpandedId] = useState<string | null>(
     activeSwitchId || switches[0]?.id || null
@@ -301,6 +303,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Expanded Settings Content */}
                   {isExpanded && (
                     <div className="px-4 pb-4 pt-3 border-t border-sky-200/80 space-y-4 text-xs bg-sky-50/90 rounded-b-2xl">
+                      {/* NOVÝ ROZŠÍŘENÝ EDITOR (termostat, blokace, rychlé zámky, role...) */}
+                      {onOpenAdvanced && (
+                        <button
+                          onClick={() => onOpenAdvanced(item.id)}
+                          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 text-white font-semibold text-sm px-4 py-2.5 rounded-xl transition shadow-sm"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          Otevřít pokročilé nastavení prvku
+                        </button>
+                      )}
+
                       {/* 1) NÁZEV SPÍNAČE */}
                       <div>
                         <label className="block font-semibold text-slate-700 mb-1">
