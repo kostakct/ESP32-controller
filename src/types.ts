@@ -96,7 +96,39 @@ export type TileSize = '1/1' | '1/2' | '1/4';
 
 export type NotifyMode = 'none' | 'on_only' | 'off_only' | 'any';
 
-export type OutMode = 'classic' | 'delay' | 'thermostat';
+export type OutMode = 'classic' | 'delay' | 'thermostat' | 'ext_switch';
+
+// "Ext. spínač" režim - OUT prvek řízený fyzickým IN tlačítkem/vypínačem.
+// Zatím jen datový model + UI (ConfigCard) - reálná firmware logika na ESP32
+// (propojení konkrétního IN pinu s touto logikou) je plánovaná práce navíc,
+// ne automaticky hotová jen tím, že existuje tento typ.
+export type ExtSwitchLogic = 'pulse' | 'state' | 'staircase';
+export type PulseShortAction = 'toggle' | 'on' | 'off' | 'delay';
+export type PulseLongAction = 'toggle' | 'on' | 'off' | 'delay';
+export type StateAction = 'on' | 'off' | 'none';
+export type StaircaseRetrigger = 'restart' | 'off';
+
+export interface ExtSwitchConfig {
+  inputId: string;
+  inputLabel: string;
+  logic: ExtSwitchLogic;
+  pulse: {
+    shortAction: PulseShortAction;
+    shortDelaySec?: number;
+    longEnabled: boolean;
+    longAction: PulseLongAction;
+    longDelaySec: number;
+  };
+  state: {
+    onAction: StateAction;
+    offAction: StateAction;
+  };
+  staircase: {
+    durationSec: number;
+    retrigger: StaircaseRetrigger;
+  };
+  scheduleWindowOnly: boolean; // true = tlačítko funguje jen v časovém okně plánu, false = 24/7
+}
 
 export type ThermostatProgram = 'auto_24h' | 'auto_timer' | 'manual';
 
@@ -187,6 +219,7 @@ export interface OutConfig {
   prefsByRole: Record<Role, RolePrefs>;
   operateFrom: Role;
   interlocks: InterlockRule[];
+  extSwitch: ExtSwitchConfig;
 }
 
 export interface OutRuntime {
@@ -221,3 +254,77 @@ export type OutCommand =
   | 'delay_cancel'
   | 'thermostat_auto'
   | 'thermostat_manual';
+
+/* ---------------- IN (Digitální vstup / Tlačítko) typy ---------------- */
+// Analogicky k OutConfig/OutRuntime výše - to, čemu rozumí firmware (reálný
+// GPIO vstup, debounce, dlouhý/krátký stisk) se synchronizuje s ESP32; zbytek
+// (role, kalendářní výluky, touchLock) je zatím jen lokální UI vrstva -
+// stejný princip jako u OutConfig, viz adaptér.
+
+export type InType = 'button' | 'switch' | 'door' | 'pir' | 'level' | 'generic';
+export type InContactType = 'no' | 'nc'; // NO (Spínací: Sepnuto = Log 1) | NC (Rozpínací: Sepnuto = Log 0)
+export type InPullResistor = 'pullup' | 'pulldown' | 'none';
+export type InTouchLock = 'none' | 'confirm' | 'slide' | 'readonly';
+export type InNotifyMode = 'none' | 'on_active' | 'on_inactive' | 'both' | 'stuck';
+
+export interface InScheduleInterval {
+  id: string;
+  enabled: boolean;
+  from: string; // "HH:MM"
+  to: string; // "HH:MM"
+  days: WeekdayIndex[];
+  action: 'block' | 'allow'; // 'block' = Výluka (tlačítko v okně ignorováno)
+}
+
+export interface InConfig {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  configName: string;
+  inNumber: number;
+  gpioPin: number;
+  name: string;
+  enabled: boolean;
+  room: number;
+  type: InType;
+  contactType: InContactType;
+  pullResistor: InPullResistor;
+  debounceMs: number; // filtrace zákmytů kontaktů v ms (10, 20, 30, 50, 100)
+  longPressThresholdMs: number; // prahová doba pro dlouhý stisk v ms (např. 1000)
+  stuckAlarm: {
+    enabled: boolean;
+    maxSec: number; // hlídání zaseknutého vstupu (např. tlačítko/plovák sepnutý > 15 min)
+  };
+  bypass: {
+    enabled: boolean; // dočasné softwarové vyřazení / ztišení vstupu (Mute)
+    untilMidnight?: boolean;
+  };
+  scheduleMode?: 'exclusion' | 'window'; // 'exclusion' = v zadaných časech je výluka, 'window' = funguje jen v zadaných časech
+  schedule: InScheduleInterval[];
+  quickLock: QuickLock;
+  quickLockDelaySec: number;
+  quickLockCalendarDays: string[];
+  touchLock: InTouchLock; // Ochrana virtuálního stisku v mobilu proti nechtěnému kliknutí
+  notify: InNotifyMode;
+  access: Record<Role, { operate: boolean; view: boolean }>;
+  prefsByRole: Record<Role, {
+    tileSize: TileSize;
+    showInRoom: boolean;
+    orderInRoom: number;
+  }>;
+}
+
+export interface InRuntime {
+  state: 'active' | 'inactive'; // active = fyzicky sepnuto, inactive = rozepnuto
+  lastChanged: number; // Date.now() timestamp
+  virtualPulse: 'none' | 'short' | 'long';
+  link: 'online' | 'offline' | 'loading';
+  isStuck: boolean;
+  activeDurationSec: number;
+}
+
+export type InCommand =
+  | 'virtual_short_press'
+  | 'virtual_long_press'
+  | 'virtual_toggle'
+  | 'bypass_toggle';

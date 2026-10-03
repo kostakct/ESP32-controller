@@ -298,10 +298,17 @@ export default function App() {
   // musí odrážet SKUTEČNÉ prvky, ne ukázková data z původního test-bench souboru.
   useEffect(() => {
     setCatalog([
-      ...switches.map((s) => ({ id: s.id, label: `${s.name} (Výstup ${s.channelIndex})` })),
-      { id: 'sensor:onewire1', label: 'OneWire teploměr 1' },
-      { id: 'sensor:onewire2', label: 'OneWire teploměr 2' },
-      { id: 'sensor:am2320', label: 'AM2320 teplota/vlhkost' },
+      ...switches.map((s) => ({
+        id: s.id,
+        label: `${s.name} (Výstup ${s.channelIndex})`,
+        type: 'out' as const,
+        source: 'local' as const,
+      })),
+      { id: 'sensor:onewire1', label: 'OneWire teploměr 1', type: 'ai' as const, source: 'local' as const },
+      { id: 'sensor:onewire2', label: 'OneWire teploměr 2', type: 'ai' as const, source: 'local' as const },
+      { id: 'sensor:am2320', label: 'AM2320 teplota/vlhkost', type: 'ai' as const, source: 'local' as const },
+      // Skutečné IN prvky (tlačítka/vstupy) přibudou v Fázi 3, až budou mít
+      // vlastní reálný stav v appce - zatím tu chybí, aby katalog neklamal.
     ]);
   }, [switches]);
   const [selectedScheduleForEdit, setSelectedScheduleForEdit] = useState<ScheduleItem | null>(null);

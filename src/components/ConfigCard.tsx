@@ -943,6 +943,7 @@ const MODE_LABEL: Record<OutMode, string> = {
   classic: 'Spínač',
   delay: 'Delay',
   thermostat: 'Termostat',
+  ext_switch: 'Ext. spínač', // Plná podpora přichází ve Fázi 2 s novým ConfigCard.tsx
 };
 
 export default function ConfigCard({

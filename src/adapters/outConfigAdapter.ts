@@ -4,7 +4,7 @@ import type {
   OutConfig,
   OutRuntime,
 } from '../types';
-import { defaultAccess, defaultPrefs } from '../components/fixtures';
+import { defaultAccess, defaultPrefs, defaultExtSwitch } from '../components/fixtures';
 
 /*
  * =============================================================================
@@ -67,6 +67,7 @@ type LocalExtras = Pick<
   | 'operateFrom'
   | 'interlocks'
   | 'schedule'
+  | 'extSwitch'
 >;
 
 function defaultExtras(sw: SwitchItem): LocalExtras {
@@ -92,6 +93,7 @@ function defaultExtras(sw: SwitchItem): LocalExtras {
     operateFrom: 'client',
     interlocks: [],
     schedule: [],
+    extSwitch: defaultExtSwitch,
   };
 }
 
@@ -159,6 +161,7 @@ export function switchToOutConfig(sw: SwitchItem, deviceName: string): OutConfig
     prefsByRole: extras.prefsByRole,
     operateFrom: extras.operateFrom,
     interlocks: extras.interlocks,
+    extSwitch: extras.extSwitch,
   };
 }
 
@@ -206,11 +209,12 @@ export function persistExtras(newConfig: OutConfig) {
   const { mode, lock, quickLock, quickLockDelaySec, quickLockCalendarDays,
     thermostatSensorId, thermostatSensorLabel, thermostatProgram,
     thermostatAutoDefault, thermostatAutoMode, thermostatHysteresis,
-    access, prefsByRole, operateFrom, interlocks, schedule } = newConfig;
+    access, prefsByRole, operateFrom, interlocks, schedule, extSwitch,
+  } = newConfig;
   saveExtrasFor(newConfig.id, {
     mode, lock, quickLock, quickLockDelaySec, quickLockCalendarDays,
     thermostatSensorId, thermostatSensorLabel, thermostatProgram,
     thermostatAutoDefault, thermostatAutoMode, thermostatHysteresis,
-    access, prefsByRole, operateFrom, interlocks, schedule,
+    access, prefsByRole, operateFrom, interlocks, schedule, extSwitch,
   });
 }
