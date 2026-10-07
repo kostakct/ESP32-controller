@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="ewelinkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#ewelinkGrad)" />
+  <circle cx="256" cy="256" r="160" fill="none" stroke="#ffffff" stroke-width="24" opacity="0.3"/>
+  <!-- Switch toggle symbol -->
+  <rect x="136" y="196" width="240" height="120" rx="60" fill="#ffffff" opacity="0.2" />
+  <circle cx="316" cy="256" r="46" fill="#ffffff" />
+  <path d="M316 238 v36 M300 248 l16 -16 16 16" fill="none" stroke="#0284c7" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

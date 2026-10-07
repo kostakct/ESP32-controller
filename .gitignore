@@ -1,0 +1,18 @@
+# Závislosti a build výstupy
+node_modules/
+dist/
+build/
+coverage/
+
+# Lokální prostředí - NIKDY nenahrávat (obsahuje Supabase anon klíč apod.)
+.env
+.env.local
+.env.*.local
+
+# Editor/OS
+.DS_Store
+.vscode/
+*.log
+
+# Ponechat vzorový soubor v repozitáři (bez skutečných hodnot)
+!.env.example
