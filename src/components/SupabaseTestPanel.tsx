@@ -14,6 +14,8 @@ export function SupabaseTestPanel() {
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [components, setComponents] = useState<ComponentRow[]>([]);
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [lastRealtimeEvent, setLastRealtimeEvent] = useState<string>('Zatím žádná živá změna nepřišla.');
+  const [realtimeCount, setRealtimeCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,8 +47,28 @@ export function SupabaseTestPanel() {
     }
 
     run();
+
+    // Fáze S2: živá demonstrace Realtime - appka (nebo ESP32 v budoucnu)
+    // zapisuje stav do component_state, a tenhle panel ukáže, že o tom
+    // ví OKAMŽITĚ, bez nutnosti stránku obnovit.
+    const channel = supabase
+      .channel('component_state_test')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'component_state' },
+        (payload) => {
+          setRealtimeCount((c) => c + 1);
+          const row = payload.new as { component_id?: string; is_on?: boolean | null };
+          setLastRealtimeEvent(
+            `${new Date().toLocaleTimeString('cs-CZ')} — prvek ${row.component_id?.slice(0, 8)}... -> is_on=${row.is_on}`
+          );
+        }
+      )
+      .subscribe();
+
     return () => {
       cancelled = true;
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -90,6 +112,13 @@ export function SupabaseTestPanel() {
               • <span className="font-semibold">{d.name}</span> ({d.board_id})
             </div>
           ))}
+
+          <div className="mt-2 pt-2 border-t border-slate-100">
+            <div className="font-bold text-slate-700">
+              Realtime: {realtimeCount} živých změn přijato
+            </div>
+            <div className="font-mono text-[10.5px] text-slate-500 break-words">{lastRealtimeEvent}</div>
+          </div>
         </div>
       )}
     </div>

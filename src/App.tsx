@@ -26,6 +26,7 @@ import ConfigCard from './components/ConfigCard';
 import { InConfigCard } from './components/InConfigCard';
 import { InSettingsModal } from './components/InSettingsModal';
 import { SupabaseTestPanel } from './components/SupabaseTestPanel';
+import { initSupabaseSync, syncRelayState, syncInputState } from './lib/syncToSupabase';
 import { setCatalog } from './components/fixtures';
 import {
   switchToOutConfig,
@@ -159,6 +160,12 @@ export default function App() {
   const switchesRef = useRef(switches);
   useEffect(() => { switchesRef.current = switches; }, [switches]);
 
+  // Fáze S2: jednorázově při startu načíst mapování prvků v Supabase
+  // (potřebné, než se tam dá cokoliv zapsat).
+  useEffect(() => {
+    initSupabaseSync('esp_01_kotelna');
+  }, []);
+
   // Listen to MQTT Telemetry to update device status & synchronize actual hardware reality
   useEffect(() => {
     if (telemetry) {
@@ -192,7 +199,10 @@ export default function App() {
             const prevVals = [prev.input1Active, prev.input2Active, prev.input3Active, prev.input4Active];
             const changedAt = [...inputLastChangedRef.current];
             nextVals.forEach((v, i) => {
-              if (v !== prevVals[i]) changedAt[i] = Date.now();
+              if (v !== prevVals[i]) {
+                changedAt[i] = Date.now();
+                syncInputState(i, v); // Fáze S2: zrcadlit jen při skutečné změně
+              }
             });
             inputLastChangedRef.current = changedAt;
             return {
@@ -239,6 +249,11 @@ export default function App() {
           // Teprve TEĎ máme jistotu - od této chvíle appka smí opustit
           // "offline/neznámý" stav a zobrazovat reálné hodnoty.
           setHasRealStatus(true);
+
+          // Fáze S2: zrcadlit reálný stav každého relé do Supabase
+          telemetry.relays.forEach((v: number, idx: number) => {
+            syncRelayState(idx, v === 1);
+          });
           setSwitches(prev =>
             prev.map(sw => {
               const hwVal = telemetry.relays[sw.channelIndex - 1];
